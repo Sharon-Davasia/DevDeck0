@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+
+# build output
+web/dist/
+dist/
+*.tsbuildinfo
+
+# local database
+server/data/
+*.db
+*.db-wal
+*.db-shm
+
+# env
+.env
+.env.local
+.env.*.local
+
+# test + tooling artifacts
+coverage/
+scripts/_smoke.bundle.mjs
+.arena/
+.DS_Store
+*.log
+npm-debug.log*
+.vscode/
+.idea/

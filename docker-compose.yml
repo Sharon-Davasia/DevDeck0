@@ -1,0 +1,37 @@
+services:
+  devdeck:
+    build: .
+    container_name: devdeck
+    restart: unless-stopped
+    ports:
+      - '4000:4000'
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: /data/devdeck.db
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in your .env file}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      SEED_DEMO: ${SEED_DEMO:-true}
+      ENABLE_COMMAND_EXECUTION: ${ENABLE_COMMAND_EXECUTION:-true}
+      DOCKER_HOST: unix:///var/run/docker.sock
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - devdeck-data:/data
+      # Read-only Docker socket so the service monitor can inspect containers.
+      # Remove this line if you do not want DevDeck to talk to Docker.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Mount the projects you want the command runner to be able to reach.
+      # - ${HOME}/dev:/workspace
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  devdeck-data:
