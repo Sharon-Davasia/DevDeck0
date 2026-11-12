@@ -1,0 +1,30 @@
+{
+  "name": "devdeck",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DevDeck \u2014 a personal, local-first workspace and API layer for developers.",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c magenta,cyan \"npm run dev -w server\" \"npm run dev -w web\"",
+    "dev:preview": "concurrently -n api,web -c magenta,cyan \"npm run dev -w server\" \"npm run dev -w web -- --host 0.0.0.0\"",
+    "build": "npm run build -w web",
+    "start": "npm run start -w server",
+    "seed": "npm run seed -w server",
+    "test": "npm run test:api && npm run test:web",
+    "lint": "node scripts/check.mjs",
+    "smoke": "node scripts/build-smoke.mjs && node scripts/_smoke.bundle.mjs",
+    "test:api": "npm run test -w server",
+    "test:web": "node --test web/tests/*.test.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "esbuild": "^0.25.0",
+    "jsdom": "^26.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
