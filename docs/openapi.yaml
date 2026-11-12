@@ -1,0 +1,1082 @@
+openapi: 3.1.0
+info:
+  title: DevDeck API
+  version: 1.0.0
+  description: |
+    Private, local-first workspace and API layer for developers. Every endpoint below
+    (except `/health` and the auth entry points) requires a bearer JWT and is scoped to
+    the authenticated user.
+  license:
+    name: MIT
+servers:
+  - url: http://localhost:4000/api
+    description: Local development
+  - url: /api
+    description: Same origin as the SPA
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+  - name: Dashboard
+  - name: Projects
+  - name: Tasks
+  - name: Commands
+  - name: Services
+  - name: Notes
+  - name: GitHub
+  - name: Search
+  - name: Activity
+  - name: Settings
+
+paths:
+  /health:
+    get:
+      tags: [Auth]
+      security: []
+      summary: Liveness probe
+      responses:
+        '200':
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  name: { type: string }
+                  uptime: { type: integer }
+                  env: { type: string }
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Create an account and seed a sample workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 80 }
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+      responses:
+        '201': { $ref: '#/components/responses/AuthSuccess' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Exchange credentials for a JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/AuthSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/demo:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Sign in to the pre-seeded demo workspace
+      responses:
+        '200': { $ref: '#/components/responses/AuthSuccess' }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user
+      responses:
+        '200':
+          description: The authenticated user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+    patch:
+      tags: [Auth]
+      summary: Update profile, theme or preferences
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                email: { type: string, format: email }
+                theme: { type: string, enum: [light, dark, system] }
+                defaultProjectId: { type: string, nullable: true }
+                prefs: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+
+  /dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Aggregated overview data for the dashboard
+      responses:
+        '200':
+          description: Dashboard payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      greeting: { type: string }
+                      stats: { type: object, additionalProperties: true }
+                      projects: { type: array, items: { $ref: '#/components/schemas/Project' } }
+                      tasksDueToday: { type: array, items: { $ref: '#/components/schemas/Task' } }
+                      recentRuns: { type: array, items: { $ref: '#/components/schemas/CommandRun' } }
+                      services: { type: array, items: { $ref: '#/components/schemas/Service' } }
+                      week: { type: array, items: { type: object, additionalProperties: true } }
+
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List projects
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, archived, all], default: active }
+        - name: q
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Projects with aggregate counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Project' } }
+    post:
+      tags: [Projects]
+      summary: Create a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Project' }
+
+  /projects/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Projects]
+      summary: Project detail with tasks, notes, commands, services and activity
+      responses:
+        '200':
+          description: Project
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Project' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Projects]
+      summary: Update or archive a project
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectInput' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Project' }
+    delete:
+      tags: [Projects]
+      summary: Delete a project
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  id: { type: string }
+
+  /tasks:
+    get:
+      tags: [Tasks]
+      summary: List tasks with filtering, sorting and pagination
+      parameters:
+        - { name: status, in: query, schema: { type: string }, description: 'Comma separated, e.g. todo,in_progress' }
+        - { name: priority, in: query, schema: { type: string }, description: 'Comma separated' }
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: due, in: query, schema: { type: string, enum: [today, overdue, week] } }
+        - { name: sort, in: query, schema: { type: string, enum: [position, due_date, priority, created_at, title] } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, default: 50, maximum: 100 } }
+      responses:
+        '200':
+          description: Paginated tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Task' } }
+                  meta: { $ref: '#/components/schemas/Pagination' }
+    post:
+      tags: [Tasks]
+      summary: Create a task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Task' }
+
+  /tasks/stats:
+    get:
+      tags: [Tasks]
+      summary: Task counters for badges and dashboards
+      responses:
+        '200':
+          description: Counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      done: { type: integer }
+                      in_progress: { type: integer }
+                      blocked: { type: integer }
+                      due_today: { type: integer }
+                      overdue: { type: integer }
+
+  /tasks/bulk:
+    post:
+      tags: [Tasks]
+      summary: Bulk status change or delete
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids: { type: array, items: { type: string }, maxItems: 200 }
+                status: { type: string, enum: [todo, in_progress, blocked, done] }
+                priority: { type: string, enum: [low, medium, high, urgent] }
+                delete: { type: boolean }
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /tasks/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    patch:
+      tags: [Tasks]
+      summary: Update a task
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskInput' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Task' }
+    delete:
+      tags: [Tasks]
+      summary: Delete a task
+      responses:
+        '200': { description: Deleted }
+
+  /commands:
+    get:
+      tags: [Commands]
+      summary: Command library, annotated with policy verdicts and run stats
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: tag, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Commands
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Command' } }
+    post:
+      tags: [Commands]
+      summary: Save a command
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, command]
+              properties:
+                name: { type: string }
+                description: { type: string }
+                command: { type: string }
+                cwd: { type: string, nullable: true }
+                tags: { type: array, items: { type: string } }
+                projectId: { type: string, nullable: true }
+                approved: { type: boolean }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Command' }
+
+  /commands/policy:
+    get:
+      tags: [Commands]
+      summary: Effective execution policy
+      responses:
+        '200':
+          description: Policy
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /commands/check:
+    post:
+      tags: [Commands]
+      summary: Evaluate a command against the allowlist without running it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                command: { type: string }
+      responses:
+        '200':
+          description: Verdict
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/PolicyVerdict' }
+
+  /commands/run:
+    post:
+      tags: [Commands]
+      summary: Execute a saved or ad-hoc command
+      description: |
+        Returns `202` with the queued run. Output is streamed over `/events`.
+        Policy-blocked commands return `400`; dangerous commands return `428`
+        with `requiresConfirmation` until re-sent with `force: true`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                commandId: { type: string }
+                command: { type: string }
+                cwd: { type: string }
+                projectId: { type: string }
+                label: { type: string }
+                env: { type: object, additionalProperties: { type: string } }
+                force: { type: boolean }
+      responses:
+        '202':
+          description: Queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/CommandRun' }
+                  policy: { $ref: '#/components/schemas/PolicyVerdict' }
+        '400': { description: Blocked by policy }
+        '428': { description: Confirmation required }
+
+  /commands/runs:
+    get:
+      tags: [Commands]
+      summary: Execution history
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [success, failed, cancelled, running, all] } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: pageSize, in: query, schema: { type: integer } }
+      responses:
+        '200':
+          description: Paginated runs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/CommandRun' } }
+                  meta: { $ref: '#/components/schemas/Pagination' }
+
+  /commands/runs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Commands]
+      summary: A single run with full output
+      responses:
+        '200':
+          description: Run
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/CommandRun' }
+    delete:
+      tags: [Commands]
+      summary: Delete a run from history
+      responses:
+        '200': { description: Deleted }
+
+  /commands/runs/{id}/cancel:
+    post:
+      tags: [Commands]
+      summary: Cancel a running command
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: Cancellation requested }
+
+  /services:
+    get:
+      tags: [Services]
+      summary: Tracked services
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [running, stopped, restarting, error, all] } }
+        - { name: projectId, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Services
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Service' } }
+                  meta:
+                    type: object
+                    properties:
+                      dockerConnected: { type: boolean }
+    post:
+      tags: [Services]
+      summary: Track a service
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                kind: { type: string, enum: [docker, process, database, tunnel] }
+                image: { type: string, nullable: true }
+                ports: { type: array, items: { type: string } }
+                projectId: { type: string, nullable: true }
+                status: { type: string, enum: [running, stopped, restarting, error] }
+      responses:
+        '201': { description: Created }
+
+  /services/docker:
+    get:
+      tags: [Services]
+      summary: Probe the Docker daemon and list containers
+      responses:
+        '200':
+          description: Docker state
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /services/{id}/{action}:
+    post:
+      tags: [Services]
+      summary: Start, stop, restart or inspect a service
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: action
+          in: path
+          required: true
+          schema: { type: string, enum: [start, stop, restart, inspect] }
+      responses:
+        '200': { description: Resulting state }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /notes:
+    get:
+      tags: [Notes]
+      summary: List notes
+      parameters:
+        - { name: kind, in: query, schema: { type: string, enum: [note, decision, debug, snippet, doc, all] } }
+        - { name: tag, in: query, schema: { type: string } }
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: pinned, in: query, schema: { type: string, enum: ['true'] } }
+        - { name: q, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Paginated notes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Note' } }
+                  meta: { $ref: '#/components/schemas/Pagination' }
+    post:
+      tags: [Notes]
+      summary: Create a note
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+                body: { type: string }
+                tags: { type: array, items: { type: string } }
+                kind: { type: string, enum: [note, decision, debug, snippet, doc] }
+                pinned: { type: boolean }
+                projectId: { type: string, nullable: true }
+      responses:
+        '201': { description: Created }
+
+  /notes/tags:
+    get:
+      tags: [Notes]
+      summary: Tag cloud with counts
+      responses:
+        '200':
+          description: Tags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        tag: { type: string }
+                        count: { type: integer }
+
+  /notes/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Notes]
+      summary: A note plus its version history
+      responses:
+        '200':
+          description: Note
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Note' }
+    patch:
+      tags: [Notes]
+      summary: Update a note (creates a revision when the body changes)
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Note' }
+      responses:
+        '200': { description: Updated }
+    delete:
+      tags: [Notes]
+      summary: Delete a note
+      responses:
+        '200': { description: Deleted }
+
+  /github/integration:
+    get:
+      tags: [GitHub]
+      summary: GitHub connection status (never returns the token)
+      responses:
+        '200': { description: Status }
+    post:
+      tags: [GitHub]
+      summary: Store an encrypted personal access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+      responses:
+        '200': { description: Connected }
+        '400': { description: GitHub rejected the token }
+    delete:
+      tags: [GitHub]
+      summary: Disconnect GitHub and wipe the secret
+      responses:
+        '200': { description: Disconnected }
+
+  /github/repos:
+    get:
+      tags: [GitHub]
+      summary: Linked repositories
+      responses:
+        '200': { description: Repositories }
+    post:
+      tags: [GitHub]
+      summary: Link a repository
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fullName]
+              properties:
+                fullName: { type: string, example: novalabs/nova-analytics }
+                projectId: { type: string, nullable: true }
+      responses:
+        '201': { description: Linked }
+
+  /github/repos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [GitHub]
+      summary: Repository snapshot
+      responses:
+        '200': { description: Repository }
+    delete:
+      tags: [GitHub]
+      summary: Unlink a repository
+      responses:
+        '200': { description: Unlinked }
+
+  /github/repos/{id}/sync:
+    post:
+      tags: [GitHub]
+      summary: Refresh repository data from GitHub
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: Synced }
+        '502': { description: GitHub request failed }
+
+  /github/activity:
+    get:
+      tags: [GitHub]
+      summary: Aggregated commits, pull requests and issues
+      responses:
+        '200': { description: Feed }
+
+  /search:
+    get:
+      tags: [Search]
+      summary: Full-text search across all entities
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: types, in: query, schema: { type: string }, description: 'Comma separated entity types' }
+      responses:
+        '200':
+          description: Grouped results with snippets
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /search/recent:
+    get:
+      tags: [Search]
+      summary: Recently updated records for palette suggestions
+      responses:
+        '200': { description: Recent items }
+
+  /activity:
+    get:
+      tags: [Activity]
+      summary: Chronological activity timeline
+      parameters:
+        - { name: type, in: query, schema: { type: string } }
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200': { description: Activity entries grouped by day }
+    post:
+      tags: [Activity]
+      summary: Log a manual entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+                description: { type: string }
+                type: { type: string }
+                projectId: { type: string, nullable: true }
+      responses:
+        '201': { description: Entry created }
+
+  /activity/summary:
+    get:
+      tags: [Activity]
+      summary: Counts per activity type
+      parameters:
+        - { name: days, in: query, schema: { type: integer, default: 30 } }
+      responses:
+        '200': { description: Summary }
+
+  /events:
+    get:
+      tags: [Settings]
+      summary: Server-Sent Events stream for the current user
+      description: |
+        Emits `ready`, `activity:new`, `service:updated`, `command:output` and `command:done`.
+        The JWT may be passed as `?token=` because EventSource cannot set headers.
+      parameters:
+        - { name: token, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+
+  /settings:
+    get:
+      tags: [Settings]
+      summary: Profile, policy, integrations and record counts
+      responses:
+        '200': { description: Settings }
+
+  /settings/prefs:
+    patch:
+      tags: [Settings]
+      summary: Merge preference keys
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prefs: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: Updated user }
+
+  /settings/export:
+    get:
+      tags: [Settings]
+      summary: Export the entire workspace as JSON
+      responses:
+        '200': { description: Downloadable snapshot }
+
+  /settings/import:
+    post:
+      tags: [Settings]
+      summary: Import a previous export
+      responses:
+        '200': { description: Import summary }
+
+  /settings/reset:
+    post:
+      tags: [Settings]
+      summary: Delete all workspace content but keep the account
+      responses:
+        '200': { description: Cleared }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    AuthSuccess:
+      description: Authenticated session
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              token: { type: string }
+              user: { $ref: '#/components/schemas/User' }
+    ValidationError:
+      description: Payload failed validation
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+              details:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    path: { type: string }
+                    message: { type: string }
+    Unauthorized:
+      description: Missing or invalid session
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+    NotFound:
+      description: Not found, or not owned by the caller
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        avatarColor: { type: string }
+        theme: { type: string, enum: [light, dark, system] }
+        defaultProjectId: { type: string, nullable: true }
+        prefs: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+
+    Project:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        description: { type: string }
+        techStack: { type: array, items: { type: string } }
+        repoUrl: { type: string, nullable: true }
+        localPath: { type: string, nullable: true }
+        environment: { type: string, enum: [local, staging, production, sandbox] }
+        status: { type: string, enum: [active, archived] }
+        color: { type: string }
+        counts:
+          type: object
+          properties:
+            openTasks: { type: integer }
+            doneTasks: { type: integer }
+            notes: { type: integer }
+            commands: { type: integer }
+            runningServices: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    ProjectInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        techStack: { type: array, items: { type: string } }
+        repoUrl: { type: string, nullable: true }
+        localPath: { type: string, nullable: true }
+        environment: { type: string, enum: [local, staging, production, sandbox] }
+        color: { type: string }
+        status: { type: string, enum: [active, archived] }
+
+    Task:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        description: { type: string }
+        priority: { type: string, enum: [low, medium, high, urgent] }
+        status: { type: string, enum: [todo, in_progress, blocked, done] }
+        dueDate: { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+        projectId: { type: string, nullable: true }
+        projectName: { type: string, nullable: true }
+
+    TaskInput:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        priority: { type: string, enum: [low, medium, high, urgent] }
+        status: { type: string, enum: [todo, in_progress, blocked, done] }
+        dueDate: { type: string, nullable: true }
+        projectId: { type: string, nullable: true }
+
+    Command:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        command: { type: string }
+        cwd: { type: string, nullable: true }
+        tags: { type: array, items: { type: string } }
+        approved: { type: boolean }
+        projectId: { type: string, nullable: true }
+        policy: { $ref: '#/components/schemas/PolicyVerdict' }
+        runCount: { type: integer }
+        lastRunAt: { type: string, nullable: true }
+
+    PolicyVerdict:
+      type: object
+      properties:
+        allowed: { type: boolean }
+        dangerous: { type: boolean }
+        binary: { type: string }
+        reason: { type: string, nullable: true }
+        warnings: { type: array, items: { type: string } }
+
+    CommandRun:
+      type: object
+      properties:
+        id: { type: string }
+        label: { type: string }
+        command: { type: string }
+        cwd: { type: string, nullable: true }
+        status: { type: string, enum: [running, success, failed, cancelled] }
+        exitCode: { type: integer, nullable: true }
+        output: { type: string }
+        durationMs: { type: integer, nullable: true }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time, nullable: true }
+
+    Service:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [docker, process, database, tunnel] }
+        containerId: { type: string, nullable: true }
+        image: { type: string, nullable: true }
+        ports: { type: array, items: { type: string } }
+        status: { type: string, enum: [running, stopped, restarting, error] }
+        cpu: { type: number }
+        memoryMb: { type: number }
+        uptimeMs: { type: integer }
+        projectName: { type: string, nullable: true }
+
+    Note:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        body: { type: string }
+        kind: { type: string, enum: [note, decision, debug, snippet, doc] }
+        tags: { type: array, items: { type: string } }
+        pinned: { type: boolean }
+        projectId: { type: string, nullable: true }
+        revisions:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              title: { type: string }
+              body: { type: string }
+              createdAt: { type: string }
+        updatedAt: { type: string, format: date-time }
+
+    Pagination:
+      type: object
+      properties:
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+        hasMore: { type: boolean }
